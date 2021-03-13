@@ -1,2 +1,2 @@
 all:
-	gcc sobel.c -o tsobel -lm
+	gcc sobel.c -o tsobel -lm -lpthread

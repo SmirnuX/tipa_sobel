@@ -21,11 +21,11 @@ int core[3][3] = { 	{  -3, -10,  -3},
 */
 
 float intensity[3]	=	{0.2126, 0.7152, 0.0722};	//Интенсивность разных цветов
-char** pic;
+unsigned char** pic;
 int** res;
 //float intensity[3] = {0.33, 0.33, 0.33};
-char brightness(char r, char g, char b);	//Яркость точки 
-int convolution(char** arr, char direction, int x, int y);	//Свертка изображения.
+unsigned char brightness(unsigned char r, unsigned char g, unsigned char b);	//Яркость точки 
+int convolution(unsigned char** arr, char direction, int x, int y);	//Свертка изображения.
 void* filter(void* args);	//Обработка полоски изображения
 
 //Аргументы:
@@ -122,7 +122,6 @@ int main(int argc, char* argv[])
 	}
 	//Непосредственно сама обработка
 	printf("Количество потоков: %i\n", thread_count);
-	clock_t start = clock();
 	pthread_t* threads;
 	int** args;
 	int strip = 0;
@@ -151,6 +150,8 @@ int main(int argc, char* argv[])
 			pthread_create(threads + i, NULL, filter, (void*) args[i]);
 		}
 	}
+	int* return_max;
+	clock_t start = clock();
 	for (int i = (thread_count - 1) * strip; i < w * h; i++)	//Обработка последней полосы
 	{
 		int sobel = 0;		
@@ -173,11 +174,18 @@ int main(int argc, char* argv[])
 	{
 		for (int i = 0; i < (thread_count - 1); i++)
 		{
-			int* return_max;
 			pthread_join(threads[i], (void*) &return_max);
 			if (*return_max > max)
 				max = *return_max;
-			free(return_max);
+		}
+	}
+	double time = (double)(clock() - start) / CLOCKS_PER_SEC;
+	printf("Прошло %f с.", time);
+	//Освобождение памяти
+	if (thread_count > 1)	//Соединение потоков
+	{
+		for (int i = 0; i < (thread_count - 1); i++)
+		{
 			free(args[i]);
 		}
 		free(args);
@@ -187,13 +195,10 @@ int main(int argc, char* argv[])
 	for (int y = 0; y < h; y++)
 		for (int x = 0; x < w; x++)
 		{
-			
-			char normal = (double) res[x][y] / (double) max * 255;
+			unsigned char normal = res[x][y];
 			for (int k = 0; k < 3; k++)
 				write(out_file, &normal, 1);
 		}
-	double time = (double)(clock() - start) / CLOCKS_PER_SEC;
-	printf("Прошло %f с.", time);
 	//Освобождение памяти
 	for (int i = 0; i < w; i++)
 	{
@@ -207,12 +212,12 @@ int main(int argc, char* argv[])
 	return 0;
 }
 
-char brightness(char r, char g, char b)	//Яркость точки 
+unsigned char brightness(unsigned char r, unsigned char g, unsigned char b)	//Яркость точки 
 {
 	return r * intensity[0] + g * intensity[1] + b * intensity[2];
 }
 
-int convolution(char** arr, char direction, int x, int y)	//Свертка изображения
+int convolution(unsigned char** arr, char direction, int x, int y)	//Свертка изображения
 {
 	int result = 0;
 	for (int i = 0; i < 3; i++)
@@ -231,7 +236,6 @@ void* filter(void* args)	//Аргументы - длина, ширина, раз
 	int h = ((int*)args)[1];
 	int strip = ((int*)args)[2];
 	int thread_n = ((int*)args)[3];
-	printf("Обработка полосы от %i до %i\n", thread_n * strip, (thread_n + 1) * strip);
 	for (int i = thread_n * strip; i < (thread_n + 1) * strip; i++)
 	{
 		int sobel = 0;		
@@ -253,4 +257,3 @@ void* filter(void* args)	//Аргументы - длина, ширина, раз
 		*res = max;
 	pthread_exit(res);
 }
-

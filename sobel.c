@@ -11,28 +11,31 @@
 #include <math.h>
 #include <pthread.h>
 
+#define MAX_DIGITS 	6	//Максимальное количество цифр в размерах изображения - должно быть больше 3
+#define CLEAR 		clear(in_file, out_file, w, h);	//Закрытие файлов и отчистка динамической памяти
+#define WRITE_ERR 	print_error("Ошибка записи в файл.\n");
+#define	READ_ERR	print_error("Неожиданный конец файла.\n");
+
 int core[3][3] = {	{ -1, -2, -1 },
 					{  0,  0,  0 },
 					{  1,  2,  1 }};
-/*
-int core[3][3] = { 	{  -3, -10,  -3},
-					{   0,   0,   0},
-					{   3,  10,   3}}; 
-*/
-
 float intensity[3]	=	{0.2126, 0.7152, 0.0722};	//Интенсивность разных цветов
-unsigned char** pic;
-int** res;
-//float intensity[3] = {0.33, 0.33, 0.33};
+unsigned char** pic = NULL;
+int** res = NULL;
+
+
 unsigned char brightness(unsigned char r, unsigned char g, unsigned char b);	//Яркость точки 
 int convolution(unsigned char** arr, char direction, int x, int y);	//Свертка изображения.
 void* filter(void* args);	//Обработка полоски изображения
+void print_error(char* err_text);	//Вывод ошибки из библиотеки errno, либо err_text, если errno = 0
+void clear(int fd1, int fd2, int w, int h);
 
 //Аргументы:
 //tsobel <input file> <output file> [threads]
 
 int main(int argc, char* argv[])
 {
+	int w = 0, h = 0;
 	int thread_count = 1;
 	if (argc < 3)
 	{
@@ -42,9 +45,9 @@ int main(int argc, char* argv[])
 	if (argc > 3)
 	{
 		thread_count = atoi(argv[3]);
-		if (thread_count < 1)	//TODO - максимальное кол-во потоков
+		if (thread_count < 1)
 		{
-			printf("Непрально указано количество потоков.\n");
+			printf("Неправильно указано количество потоков.\n");
 			return 1;
 		}
 	}
@@ -55,22 +58,47 @@ int main(int argc, char* argv[])
 		return errno;
 	}
 	int out_file = open(argv[2], O_CREAT | O_WRONLY, 0666);
-	char buf[6];
+	if (out_file < 0)
+	{
+		perror("Ошибка создания файла.");
+		return errno;
+	}
+	char buf[MAX_DIGITS];
 	char temp;
-	read(in_file, buf, 3);
-	if (buf[0] == 'P' && buf[1] == '6')
-		write(out_file, "P6\n", 3);
-	else
+	buf[0] = '\0';
+	buf[1] = '\0';
+	if (read(in_file, buf, 3) != 3 || buf[0] != 'P' || buf[1] != '6')	//Чтение метки
 	{
-		printf("не P6\n");
-		close(in_file);
-		close(out_file);
-		return 2;
+		printf("Неподдерживаемый формат файла. Поддерживаются только файлы PNM формата P6.\n");
+		CLEAR
+		return EBADF;
 	}
-	//TODO - Пропуск коммента
-	for (int i = 0; ; i++)	//Вставить проверку на конец файла и 
+	if (write(out_file, "P6\n", 3) != 3)
 	{
-		read(in_file, &temp, 1);
+		CLEAR		
+		WRITE_ERR
+	}
+	int i;
+	for (i = 0; i < MAX_DIGITS; i++)	
+	{
+		if (read(in_file, &temp, 1) != 1)
+		{
+			CLEAR
+			READ_ERR
+		}
+		if (i == 0 && temp == '#')	//Пропуск комментариев
+		{
+			while (temp != '\0')
+			{
+				if (read(in_file, &temp, 1) != 1)
+				{
+					CLEAR
+					READ_ERR
+				}
+			}
+			i = -1;	//Следующая итерация будет тоже с i == 0
+			continue;
+		}
 		if (temp < '0' || temp > '9')
 		{
 			buf[i] = '\0';
@@ -79,12 +107,36 @@ int main(int argc, char* argv[])
 		else 
 			buf[i] = temp;
 	}
-	write(out_file, &buf, strlen(buf));
-	write(out_file, " ", 1);
-	int w = atoi(buf);
-	for (int i = 0; ; i++)	//Вставить проверку на конец файла и 
+	if (i == MAX_DIGITS)
 	{
-		read(in_file, &temp, 1);
+		CLEAR
+		printf("Файл слишком большой. Увеличьте MAX_DIGITS для поддержки больших изображений.\n");
+		return 1;
+	}
+	if (write(out_file, &buf, strlen(buf)) != strlen(buf))
+	{
+		CLEAR
+		WRITE_ERR
+	}
+	if (write(out_file, " ", 1) != 1)
+	{
+		CLEAR
+		WRITE_ERR
+	}
+	w = atoi(buf);
+	if (w <= 0)
+	{
+		printf("Некорректное значение ширины файла.\n");
+		CLEAR
+		return EDOM;
+	}
+	for (i = 0; i < MAX_DIGITS; i++)
+	{
+		if (read(in_file, &temp, 1) != 1)
+		{
+			CLEAR
+			READ_ERR
+		}
 		if (temp < '0' || temp > '9')
 		{
 			buf[i] = '\0';
@@ -93,30 +145,87 @@ int main(int argc, char* argv[])
 		else 
 			buf[i] = temp;
 	}
-	write(out_file, &buf, strlen(buf));
-	write(out_file, "\n", 1);
-	int h = atoi(buf);
+	if (i == MAX_DIGITS)
+	{
+		CLEAR
+		printf("Файл слишком большой. Увеличьте MAX_DIGITS для поддержки больших изображений.\n");
+		return 1;
+	}
+	if (write(out_file, &buf, strlen(buf)) != strlen(buf))
+	{
+		CLEAR
+		WRITE_ERR
+	}
+	if (write(out_file, "\n", 1) != 1)
+	{
+		CLEAR
+		WRITE_ERR
+	}
+	h = atoi(buf);
+	if (h <= 0)
+	{
+		printf("Некорректное значение высоты файла.\n");
+		CLEAR
+		return EDOM;
+	}
 	pic = malloc(w * sizeof(char*));
 	res = malloc(w * sizeof(int*));
+	if (pic == NULL || res == NULL)
+	{
+		CLEAR
+		print_error("Ошибка выделения памяти");
+	}
 	for (int i = 0; i < w; i++)
 	{
 		pic[i] = malloc(h * sizeof(char));	//pic[w][h]
 		res[i] = malloc(h * sizeof(int));
+		if (pic[i] == NULL || res[i] == NULL)
+		{
+			for (int j = 0; j < i; j++)	//Очистка выделенной в предыдущих итерациях памяти
+			{
+				free(pic[j]);
+				free(res[j]);
+			}
+			if (pic[i] != NULL)
+				free(pic[i]);
+			else
+				free(res[i]);
+			free(res);
+			free(pic);
+			print_error("Ошибка выделения памяти");
+		}
 	}
 	printf("%ix%i\n", w, h);
-	read(in_file, buf, 4);
-	write(out_file, "255\n", 4);
-	for (int i = 0; i < h; i++)
+	if (read(in_file, buf, 4) != 4)
+	{
+		CLEAR
+		READ_ERR
+	}
+	buf[3] = '\0';
+	if (atoi(buf) != 255)
+	{
+		CLEAR
+		printf("Неправильный формат изображения.\n");
+		return EBADF;
+	}
+	if (write(out_file, "255\n", 4) != 4)
+	{
+		CLEAR
+		READ_ERR
+	}
+	for (int i = 0; i < h; i++)	//Чтение из файла в массив
 	{
 		for (int j = 0; j < w; j++)
 		{
-			int r, g, b;
+			unsigned char r, g, b;
 			r = 0;
 			g = 0;
 			b = 0;
-			read(in_file, &r, 1);
-			read(in_file, &g, 1);
-			read(in_file, &b, 1);
+			if (read(in_file, &r, 1) != 1 || read(in_file, &g, 1) != 1 || read(in_file, &b, 1) != 1)
+			{
+				CLEAR
+				READ_ERR
+			}
 			pic[j][i] = brightness(r, g, b);	//Запись в ч/б
 		}
 	}
@@ -130,7 +239,7 @@ int main(int argc, char* argv[])
 	{
 		if (w * h > thread_count)
 		{
-			strip = w*h / thread_count;
+			strip = w * h / thread_count;
 			printf("Длина потоковой полосы: %i\n", strip);
 		}
 		else
@@ -140,14 +249,41 @@ int main(int argc, char* argv[])
 		}
 		threads = malloc((thread_count - 1) * sizeof(pthread_t));
 		args = malloc((thread_count - 1) * sizeof(int*));		
+		if (threads == NULL || args == NULL)
+		{
+			CLEAR
+			if (threads == NULL)
+				free(args);
+			else
+				free(threads);
+				print_error("Ошибка выделения памяти.\n");
+		}
 		for (int i = 0; i < (thread_count - 1); i++)
 		{
 			args[i] = malloc (4 * sizeof(int));
+			if (args[i] == NULL)
+			{
+				free(args);
+				free(threads);
+				CLEAR
+				print_error("Ошибка выделения памяти.\n");
+			}
 			args[i][0] = w;
 			args[i][1] = h;
 			args[i][2] = strip;
 			args[i][3] = i;
-			pthread_create(threads + i, NULL, filter, (void*) args[i]);
+			if (pthread_create(threads + i, NULL, filter, (void*) args[i]) != 0)
+			{
+				CLEAR
+				for (int j = 0; j < i; j++)
+				{
+					pthread_cancel(threads[j]);
+					free(args[j]);
+				}
+				free(threads);			
+				free(args);
+				print_error("Ошибка создания потоков.\n");
+			}
 		}
 	}
 	int* return_max;
@@ -163,10 +299,13 @@ int main(int argc, char* argv[])
 		{
 			int gy = convolution(pic, 0, x, y);
 			int gx = convolution(pic, 1, x, y);
-			double catets = gx*gx + gy*gy;
+			long catets = gx*gx + gy*gy;
 			sobel = sqrt(catets);
 			if (sobel > max)
-				max = sobel;	//Нормализация
+			{
+				printf("%i > %i \n", sobel, max);
+				max = sobel;	//Нормализация	
+			}
 		}	
 		res[x][y] = sobel;
 	}
@@ -174,7 +313,19 @@ int main(int argc, char* argv[])
 	{
 		for (int i = 0; i < (thread_count - 1); i++)
 		{
-			pthread_join(threads[i], (void*) &return_max);
+			if (pthread_join(threads[i], (void*) &return_max) != 0)
+			{
+				CLEAR
+				for (int j = 0; j < (thread_count - 1); j++)
+				{
+					if (j > i)
+						pthread_cancel(threads[j]);
+					free(args[j]);
+				}
+				free(threads);			
+				free(args);
+				print_error("Ошибка обьединения потоков.\n");
+			}
 			if (*return_max > max)
 				max = *return_max;
 		}
@@ -195,20 +346,17 @@ int main(int argc, char* argv[])
 	for (int y = 0; y < h; y++)
 		for (int x = 0; x < w; x++)
 		{
-			unsigned char normal = res[x][y];
+			unsigned char normal = ((double) res[x][y] / (double) max) * 255;
 			for (int k = 0; k < 3; k++)
-				write(out_file, &normal, 1);
+			{
+				if (write(out_file, &normal, 1) != 1)
+				{
+					CLEAR
+					WRITE_ERR
+				}
+			}
 		}
-	//Освобождение памяти
-	for (int i = 0; i < w; i++)
-	{
-		free(pic[i]);
-		free(res[i]);
-	}
-	free(res);
-	free(pic);
-	close(in_file);
-	close(out_file);
+	CLEAR
 	return 0;
 }
 
@@ -256,4 +404,38 @@ void* filter(void* args)	//Аргументы - длина, ширина, раз
 	int* res = malloc(sizeof(int));
 		*res = max;
 	pthread_exit(res);
+}
+
+void print_error(char* err_text)
+{
+	if (errno == 0)
+		printf("%s", err_text);
+	else
+		perror("");
+	exit(errno);
+}
+
+void clear(int fd1, int fd2, int w, int h)
+{
+	close(fd1);
+	close(fd2);
+	//Освобождение памяти
+	if (pic != NULL)
+	{
+		for (int i = 0; i < w; i++)
+		{
+			free(pic[i]);
+		}
+		free(pic);
+		pic = NULL;
+	}
+	if (res != NULL)
+	{
+		for (int i = 0; i < w; i++)
+		{
+			free(res[i]);
+		}
+		free(res);
+		res = NULL;
+	}
 }

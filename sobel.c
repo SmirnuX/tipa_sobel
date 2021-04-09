@@ -302,10 +302,7 @@ int main(int argc, char* argv[])
 			long catets = gx*gx + gy*gy;
 			sobel = sqrt(catets);
 			if (sobel > max)
-			{
-				printf("%i > %i \n", sobel, max);
 				max = sobel;	//Нормализация	
-			}
 		}	
 		res[x][y] = sobel;
 	}

@@ -15,6 +15,7 @@
 #define CLEAR 		clear(in_file, out_file, w, h);	//Закрытие файлов и отчистка динамической памяти
 #define WRITE_ERR 	print_error("Ошибка записи в файл.\n");
 #define	READ_ERR	print_error("Неожиданный конец файла.\n");
+#define SELCLOCK	CLOCK_PROCESS_CPUTIME_ID
 
 int core[3][3] = {	{ -1, -2, -1 },
 					{  0,  0,  0 },
@@ -287,7 +288,14 @@ int main(int argc, char* argv[])
 		}
 	}
 	int* return_max;
-	clock_t start = clock();
+	clockid_t timer = SELCLOCK;
+	struct timespec time;
+	struct timespec st_time;
+	clock_getres(timer, &time);
+	printf("Запуск таймера, точность: %li с. %li нс.\n\n", time.tv_sec, time.tv_nsec);
+	time.tv_nsec = 0;
+	time.tv_sec = 0;	
+	clock_gettime(timer, &st_time);	//Запуск таймера
 	for (int i = (thread_count - 1) * strip; i < w * h; i++)	//Обработка последней полосы
 	{
 		int sobel = 0;		
@@ -302,10 +310,7 @@ int main(int argc, char* argv[])
 			long catets = gx*gx + gy*gy;
 			sobel = sqrt(catets);
 			if (sobel > max)
-			{
-				printf("%i > %i \n", sobel, max);
 				max = sobel;	//Нормализация	
-			}
 		}	
 		res[x][y] = sobel;
 	}
@@ -330,8 +335,8 @@ int main(int argc, char* argv[])
 				max = *return_max;
 		}
 	}
-	double time = (double)(clock() - start) / CLOCKS_PER_SEC;
-	printf("Прошло %f с.", time);
+	clock_gettime(timer, &time);
+	printf("Прошло %lld с, %li нс.\n", (long long) (time.tv_sec - st_time.tv_sec), time.tv_nsec - st_time.tv_nsec);
 	//Освобождение памяти
 	if (thread_count > 1)	//Соединение потоков
 	{

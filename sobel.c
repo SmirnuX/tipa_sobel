@@ -36,6 +36,7 @@ void clear(int fd1, int fd2, int w, int h);
 
 int main(int argc, char* argv[])
 {
+	printf("!!!ДАННАЯ ВЕРСИЯ НЕ СОХРАНЯЕТ ФАЙЛ!!!");	//TODO - убрать
 	int w = 0, h = 0;
 	int thread_count = 1;
 	if (argc < 3)
@@ -281,69 +282,81 @@ int main(int argc, char* argv[])
 	struct timespec st_time;
 	clock_getres(timer, &time);
 	printf("Запуск таймера, точность: %li с. %li нс.\n\n", time.tv_sec, time.tv_nsec);
-	time.tv_nsec = 0;
-	time.tv_sec = 0;	
-	clock_gettime(timer, &st_time);	//Запуск таймера
-	if (thread_count > 1)	//Запуск потоков
+	double mean = 0;
+	double th_min = 100000000000; //10^11
+	double th_max = 0;
+	for (int i = 0; i < 100; i++)
 	{
-		for (int i = 0; i < (thread_count - 1); i++)
+		time.tv_nsec = 0;
+		time.tv_sec = 0;
+		clock_gettime(timer, &st_time);	// <- Запуск таймера
+		if (thread_count > 1)	//Запуск потоков
 		{
-			if (pthread_create(threads + i, NULL, filter, (void*)args[i]) != 0)
+			for (int i = 0; i < (thread_count - 1); i++)
 			{
-				CLEAR
-					for (int j = 0; j < i; j++)
-					{
-						pthread_cancel(threads[j]);
-						free(args[j]);
-					}
-				free(threads);
-				free(args);
-				print_error("Ошибка создания потоков.\n");
-			}
-		}
-	}
-	for (int i = (thread_count - 1) * strip; i < w * h; i++)	//Обработка последней полосы
-	{
-		int sobel = 0;		
-		int x = i % w;
-		int y = i / w;	
-		if (x == 0 || x == w-1 || y == 0 || y == h-1)	//Края не обрабатываются
-			sobel = 0;
-		else
-		{
-			int gy = convolution(pic, 0, x, y);
-			int gx = convolution(pic, 1, x, y);
-			long catets = gx*gx + gy*gy;
-			sobel = sqrt(catets);
-			if (sobel > max)
-				max = sobel;	//Нормализация	
-		}	
-		res[x][y] = sobel;
-	}
-	if (thread_count > 1)	//Соединение потоков
-	{
-		for (int i = 0; i < (thread_count - 1); i++)
-		{
-			if (pthread_join(threads[i], (void*) &return_max) != 0)
-			{
-				CLEAR
-				for (int j = 0; j < (thread_count - 1); j++)
+				if (pthread_create(threads + i, NULL, filter, (void*)args[i]) != 0)
 				{
-					if (j > i)
-						pthread_cancel(threads[j]);
-					free(args[j]);
+					CLEAR
+						for (int j = 0; j < i; j++)
+						{
+							pthread_cancel(threads[j]);
+							free(args[j]);
+						}
+					free(threads);
+					free(args);
+					print_error("Ошибка создания потоков.\n");
 				}
-				free(threads);			
-				free(args);
-				print_error("Ошибка обьединения потоков.\n");
 			}
-			if (*return_max > max)
-				max = *return_max;
 		}
+		for (int i = (thread_count - 1) * strip; i < w * h; i++)	//Обработка последней полосы
+		{
+			int sobel = 0;
+			int x = i % w;
+			int y = i / w;
+			if (x == 0 || x == w - 1 || y == 0 || y == h - 1)	//Края не обрабатываются
+				sobel = 0;
+			else
+			{
+				int gy = convolution(pic, 0, x, y);
+				int gx = convolution(pic, 1, x, y);
+				long catets = gx * gx + gy * gy;
+				sobel = sqrt(catets);
+				if (sobel > max)
+					max = sobel;	//Нормализация	
+			}
+			res[x][y] = sobel;
+		}
+		if (thread_count > 1)	//Соединение потоков
+		{
+			for (int i = 0; i < (thread_count - 1); i++)
+			{
+				if (pthread_join(threads[i], (void*)&return_max) != 0)
+				{
+					CLEAR
+						for (int j = 0; j < (thread_count - 1); j++)
+						{
+							if (j > i)
+								pthread_cancel(threads[j]);
+							free(args[j]);
+						}
+					free(threads);
+					free(args);
+					print_error("Ошибка обьединения потоков.\n");
+				}
+				if (*return_max > max)
+					max = *return_max;
+			}
+		}
+		clock_gettime(timer, &time);	// <- конец таймера
+		double nano = time.tv_sec * 1000000000 - st_time.tv_sec * 1000000000 + time.tv_nsec - st_time.tv_nsec;
+		printf("%i. Прошло %g нс.\n", i, nano);
+		mean += nano / 100;
+		if (th_min > nano)
+			th_min = nano;
+		if (th_max < nano)
+			th_max = nano;
 	}
-	clock_gettime(timer, &time);
-	double nano = time.tv_sec * 1000000000 - st_time.tv_sec * 1000000000 + time.tv_nsec - st_time.tv_nsec;
-	printf("Прошло %g нс.\n", nano);
+	printf("!!! \n\tMIN: \t%g ns\n\tMEAN: \t%g ns\n\tMAX: \t%g !!!\n", th_min, mean, th_max);
 	//Освобождение памяти
 	if (thread_count > 1)	//Соединение потоков
 	{
@@ -354,6 +367,7 @@ int main(int argc, char* argv[])
 		free(args);
 		free(threads);
 	}
+	/*	УБРАНА ЗАПИСЬ В ФАЙЛ
 	printf("Запись в файл...\n");
 	for (int y = 0; y < h; y++)
 		for (int x = 0; x < w; x++)
@@ -368,6 +382,7 @@ int main(int argc, char* argv[])
 				}
 			}
 		}
+	*/
 	CLEAR
 	return 0;
 }

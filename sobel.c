@@ -88,7 +88,7 @@ int main(int argc, char* argv[])
 		}
 		if (i == 0 && temp == '#')	//Пропуск комментариев
 		{
-			while (temp != '\0')
+			while (temp != '\n')
 			{
 				if (read(in_file, &temp, 1) != 1)
 				{

@@ -15,6 +15,7 @@
 #define CLEAR 		clear(in_file, out_file, w, h);	//Закрытие файлов и отчистка динамической памяти
 #define WRITE_ERR 	print_error("Ошибка записи в файл.\n");
 #define	READ_ERR	print_error("Неожиданный конец файла.\n");
+#define SELCLOCK	CLOCK_REALTIME
 
 int core[3][3] = {	{ -1, -2, -1 },
 					{  0,  0,  0 },
@@ -235,7 +236,7 @@ int main(int argc, char* argv[])
 	int** args;
 	int strip = 0;
 	int max = 0;
-	if (thread_count > 1)	//Запуск потоков
+	if (thread_count > 1)	//Подготовка к потокам
 	{
 		if (w * h > thread_count)
 		{
@@ -272,22 +273,35 @@ int main(int argc, char* argv[])
 			args[i][1] = h;
 			args[i][2] = strip;
 			args[i][3] = i;
-			if (pthread_create(threads + i, NULL, filter, (void*) args[i]) != 0)
+		}
+	}
+	int* return_max;
+	clockid_t timer = SELCLOCK;
+	struct timespec time;
+	struct timespec st_time;
+	clock_getres(timer, &time);
+	printf("Запуск таймера, точность: %li с. %li нс.\n\n", time.tv_sec, time.tv_nsec);
+	time.tv_nsec = 0;
+	time.tv_sec = 0;	
+	clock_gettime(timer, &st_time);	//Запуск таймера
+	if (thread_count > 1)	//Запуск потоков
+	{
+		for (int i = 0; i < (thread_count - 1); i++)
+		{
+			if (pthread_create(threads + i, NULL, filter, (void*)args[i]) != 0)
 			{
 				CLEAR
-				for (int j = 0; j < i; j++)
-				{
-					pthread_cancel(threads[j]);
-					free(args[j]);
-				}
-				free(threads);			
+					for (int j = 0; j < i; j++)
+					{
+						pthread_cancel(threads[j]);
+						free(args[j]);
+					}
+				free(threads);
 				free(args);
 				print_error("Ошибка создания потоков.\n");
 			}
 		}
 	}
-	int* return_max;
-	clock_t start = clock();
 	for (int i = (thread_count - 1) * strip; i < w * h; i++)	//Обработка последней полосы
 	{
 		int sobel = 0;		
@@ -327,8 +341,9 @@ int main(int argc, char* argv[])
 				max = *return_max;
 		}
 	}
-	double time = (double)(clock() - start) / CLOCKS_PER_SEC;
-	printf("Прошло %f с.", time);
+	clock_gettime(timer, &time);
+	double nano = time.tv_sec * 1000000000 - st_time.tv_sec * 1000000000 + time.tv_nsec - st_time.tv_nsec;
+	printf("Прошло %g нс.\n", nano);
 	//Освобождение памяти
 	if (thread_count > 1)	//Соединение потоков
 	{
